@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: raaz-server
+    runtime: node
+    buildCommand: ""
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: RAAZ_DB
+        value: /var/data/raaz.db
+      - key: RAAZ_UPLOADS
+        value: /var/data/uploads
+    disk:
+      name: raaz-data
+      mountPath: /var/data
+      sizeGB: 1

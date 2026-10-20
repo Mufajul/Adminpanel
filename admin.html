@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raaz Admin Control Center</title>
+<style>
+:root{--pink:#e0245e;--pink2:#fa3e55;--pinkbg:#fdf0f3;--ink:#23232a;--grey:#6b6b76;--line:#eee2e6;--ok:#1a9e54;--warn:#d97706;--bad:#dc2626}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f7f5f6;color:var(--ink)}
+a{color:var(--pink)}
+button{background:var(--pink);color:#fff;border:0;border-radius:10px;padding:9px 16px;font-weight:600;cursor:pointer}
+button.ghost{background:#fff;color:var(--pink);border:1px solid var(--pink)}
+button.grey{background:#ececf1;color:var(--ink)}button.sm{padding:5px 10px;font-size:12px;border-radius:8px}
+button.danger{background:var(--bad)}button:disabled{opacity:.5}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid #ddd;border-radius:10px;font:inherit;background:#fff}
+label{font-size:12px;font-weight:700;color:var(--grey);display:block;margin:10px 0 4px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;overflow:hidden}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;font-size:13px;vertical-align:top}
+th{background:var(--pinkbg);color:var(--ink)}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.stat{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px}.stat b{font-size:26px;display:block}.stat span{color:var(--grey);font-size:12px;font-weight:700}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:140px}
+.badge{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--pinkbg);color:var(--pink)}
+.badge.green{background:#e4f7ec;color:var(--ok)}.badge.amber{background:#fdf1de;color:var(--warn)}.badge.red{background:#fdeaea;color:var(--bad)}.badge.greyb{background:#eee;color:var(--grey)}
+#layout{display:flex;min-height:100vh}
+#side{width:230px;background:var(--ink);color:#fff;padding:18px 0;flex:none;position:sticky;top:0;height:100vh;overflow:auto}
+#side h1{font-size:19px;margin:0 16px 4px}#side .sub{color:#bdbdc7;font-size:12px;margin:0 16px 14px}
+#side nav button{display:block;width:100%;background:none;color:#e8e8ee;text-align:left;padding:10px 16px;border-radius:0;font-weight:500}
+#side nav button.on,#side nav button:hover{background:var(--pink);color:#fff}
+#main{flex:1;padding:20px;min-width:0}
+#topbar{display:flex;align-items:center;gap:10px;margin-bottom:16px}#topbar h2{margin:0;font-size:22px}
+#drawer{position:fixed;top:0;right:0;width:min(480px,94vw);height:100vh;background:#fff;box-shadow:-6px 0 30px rgba(0,0,0,.18);padding:20px;overflow:auto;z-index:60;display:none}
+#loginWrap{position:fixed;inset:0;background:linear-gradient(160deg,#fdf0f3,#fff);display:flex;align-items:center;justify-content:center;z-index:100}
+#loginBox{background:#fff;border:1px solid var(--line);border-radius:20px;padding:28px;width:min(380px,92vw);box-shadow:0 20px 50px rgba(224,36,94,.12)}
+.switch{display:flex;align-items:center;gap:8px;margin:7px 0}.switch input{width:auto}
+.msg{padding:10px 14px;border-radius:10px;background:var(--pinkbg);margin:10px 0;font-size:13px}
+pre{background:#23232a;color:#ffd7e2;border-radius:12px;padding:12px;overflow:auto;font-size:12px;white-space:pre-wrap}
+@media(max-width:820px){#side{width:64px}#side h1,#side .sub,#side nav button span{display:none}#side nav button{text-align:center}}
+</style></head><body>
+
+<div id="loginWrap"><div id="loginBox">
+  <h1 style="color:var(--pink);margin:0 0 4px">Raaz Admin</h1>
+  <p style="color:var(--grey);margin:0 0 8px">Control Center — sign in with an admin account.</p>
+  <label>Email</label><input id="li_email" type="email" autocomplete="username">
+  <label>Password</label><input id="li_pass" type="password" autocomplete="current-password">
+  <div id="li_err" class="msg" style="display:none;background:#fdeaea"></div>
+  <button style="width:100%;margin-top:14px" onclick="doLogin()">Sign In</button>
+  <p style="font-size:12px;color:var(--grey)">Seed super admin: admin@raaz.app — change the password after deployment.</p>
+</div></div>
+
+<div id="layout" style="display:none">
+  <aside id="side"><h1>Raaz</h1><p class="sub">Admin Control Center</p><nav id="nav"></nav>
+    <div style="padding:14px 16px"><div id="meBox" style="font-size:12px;color:#bdbdc7"></div>
+    <button class="grey sm" onclick="logoutAll()">Logout (all sessions)</button></div>
+  </aside>
+  <main id="main"><div id="topbar"><h2 id="viewTitle">Dashboard</h2><span id="topMsg"></span></div><div id="view"></div></main>
+</div>
+
+<aside id="drawer"></aside>
+<div id="modal"></div>
+
+<script>
+let TOKEN = localStorage.getItem('raaz_admin_token') || '';
+let ADMIN = JSON.parse(localStorage.getItem('raaz_admin') || 'null');
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + TOKEN }, body: body ? JSON.stringify(body) : undefined });
+  const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch (e) { j = { raw: t }; }
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+/* ---- photo upload helper: file chuno -> server par upload -> URL field me bhar jayega ---- */
+function pickUpload(targetInput) {
+  const f = document.createElement('input'); f.type = 'file'; f.accept = 'image/png,image/jpeg,image/webp,image/gif';
+  f.onchange = async () => {
+    const file = f.files[0]; if (!file) return;
+    if (file.size > 6 * 1024 * 1024) { alert('Photo 6MB se badi hai'); return; }
+    const rd = new FileReader();
+    rd.onload = async () => {
+      try { const r = await api('POST', '/api/admin/upload', { name: file.name.replace(/\.[^.]+$/, ''), data: rd.result });
+        targetInput.value = location.origin + r.url; toast('Photo upload ho gayi'); }
+      catch (e) { alert('Upload fail: ' + e.message); }
+    };
+    rd.readAsDataURL(file);
+  };
+  f.click();
+}
+function upBtn(targetExpr) { return `<button type="button" class="sm" onclick="pickUpload(${targetExpr})">📷 Upload Photo</button>`; }
+function toast(m) { $('#topMsg').innerHTML = '<span class="badge">' + esc(m) + '</span>'; setTimeout(() => $('#topMsg').innerHTML = '', 3500); }
+async function doLogin() {
+  try {
+    const j = await api('POST', '/api/admin/login', { email: $('#li_email').value, password: $('#li_pass').value });
+    TOKEN = j.token; ADMIN = j.admin;
+    localStorage.setItem('raaz_admin_token', TOKEN); localStorage.setItem('raaz_admin', JSON.stringify(ADMIN));
+    boot();
+  } catch (e) { const d = $('#li_err'); d.style.display = 'block'; d.textContent = e.message; }
+}
+async function logoutAll() { try { await api('POST', '/api/admin/logout-all'); } catch (e) {} TOKEN = ''; localStorage.clear(); location.reload(); }
+const NAV = [['dashboard','📊 Dashboard'],['videos','🎬 Videos'],['categories','🗂 Categories'],['feeds','📰 Feeds'],['home','🏠 Home Sections'],['users','👥 Users'],['plans','👑 Pro Plans'],['packages','🪙 Coin Packages'],['claims','🧾 Payment Claims'],['ledger','📒 Coin Ledger'],['rewards','🎁 Rewards Config'],['notifications','🔔 Notifications'],['settings','⚙️ App Settings'],['version','⬆️ Version Control'],['branding','🎨 Branding'],['payconfig','💳 Payment Config'],['reports','🚩 Reports'],['audit','🧾 Audit Log'],['database','🗄 Database'],['docs','📖 API Docs']];
+function boot() {
+  $('#loginWrap').style.display = 'none'; $('#layout').style.display = 'flex';
+  $('#meBox').textContent = ADMIN ? (ADMIN.name + ' · ' + ADMIN.role) : '';
+  $('#nav').innerHTML = NAV.map(n => '<button data-v="' + n[0] + '" onclick="show(\'' + n[0] + '\')">' + n[1].split(' ')[0] + ' <span>' + n[1].split(' ').slice(1).join(' ') + '</span></button>').join('');
+  show('dashboard');
+}
+let VIEWS = {};
+function show(v) {
+  document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  $('#viewTitle').textContent = (NAV.find(n => n[0] === v) || ['', v])[1];
+  closeDrawer();
+  (VIEWS[v] || (() => $('#view').innerHTML = '<div class="card">Not implemented</div>'))();
+}
+function badge(st) { const cls = st === 'published' || st === 'approved' || st === 'active' || st === 'completed' ? 'green' : st === 'pending' || st === 'draft' || st === 'scheduled' ? 'amber' : st === 'rejected' || st === 'suspended' || st === 'archived' ? 'red' : 'greyb'; return '<span class="badge ' + cls + '">' + esc(st) + '</span>'; }
+function barChart(data, labelKey, valKey, color) {
+  if (!data || !data.length) return '<p style="color:var(--grey)">No data yet</p>';
+  const max = Math.max(...data.map(d => +d[valKey] || 0), 1); const w = 560, h = 150, bw = Math.floor(w / data.length) - 6;
+  return '<svg viewBox="0 0 ' + w + ' ' + (h + 24) + '" style="width:100%">' + data.map((d, i) => { const bh = Math.round((+d[valKey] || 0) / max * h); const x = i * (bw + 6); return '<rect x="' + x + '" y="' + (h - bh) + '" width="' + bw + '" height="' + bh + '" rx="4" fill="' + (color || '#e0245e') + '"><title>' + esc(d[labelKey]) + ': ' + d[valKey] + '</title></rect><text x="' + (x + bw / 2) + '" y="' + (h + 16) + '" font-size="9" text-anchor="middle" fill="#6b6b76">' + esc(String(d[labelKey]).slice(5)) + '</text>'; }).join('') + '</svg>';
+}
+function closeDrawer() { $('#drawer').style.display = 'none'; $('#drawer').innerHTML = ''; }
+function openDrawer(html) { const d = $('#drawer'); d.innerHTML = html; d.style.display = 'block'; }
+
+/* ---------- DASHBOARD ---------- */
+VIEWS.dashboard = async () => {
+  const v = $('#view'); v.innerHTML = '<div class="card">Loading…</div>';
+  const d = await api('GET', '/api/admin/dashboard');
+  const an = await api('GET', '/api/admin/analytics');
+  v.innerHTML = `
+  <div class="grid">
+    <div class="stat"><span>TOTAL USERS</span><b>${d.users.total}</b></div>
+    <div class="stat"><span>FREE / PRO / GUEST</span><b>${d.users.free} / ${d.users.pro} / ${d.users.guests}</b></div>
+    <div class="stat"><span>ACTIVE (7D)</span><b>${d.users.active_7d}</b></div>
+    <div class="stat"><span>VIDEOS</span><b>${d.videos.total}</b></div>
+    <div class="stat"><span>PUBLISHED / DRAFT / SCHED.</span><b>${d.videos.published} / ${d.videos.draft} / ${d.videos.scheduled}</b></div>
+    <div class="stat"><span>PLAYS · WATCH SEC</span><b>${d.plays} · ${d.watch_sec}</b></div>
+    <div class="stat"><span>COINS CREDITED</span><b>${d.coins.credited}</b></div>
+    <div class="stat"><span>COINS DEBITED</span><b>${d.coins.debited}</b></div>
+    <div class="stat"><span>CLAIMS PENDING</span><b>${d.claims.pending}</b></div>
+    <div class="stat"><span>ACTIVE SUBSCRIPTIONS</span><b>${d.active_subscriptions}</b></div>
+    <div class="stat"><span>ADMOB REVENUE</span><b>—</b><span>${esc(d.admob_note)}</span></div>
+  </div>
+  <div class="row">
+    <div class="card"><h3>New users (by day)</h3>${barChart(an.users_by_day, 'day', 'n')}</div>
+    <div class="card"><h3>Views (by day)</h3>${barChart(an.views_by_day, 'day', 'n', '#23232a')}</div>
+  </div>
+  <div class="row">
+    <div class="card"><h3>Top videos</h3>${d.top_videos.map(x => '<p>🎬 ' + esc(x.title) + ' — <b>' + x.views + '</b> views</p>').join('') || '<p>No videos</p>'}
+    <h3>Top categories</h3>${d.top_categories.map(x => '<p>' + esc(x.name) + ' — <b>' + x.views + '</b> views</p>').join('')}</div>
+    <div class="card"><h3>Recent admin activity</h3>${d.recent_audit.map(x => '<p style="font-size:12px">' + esc(x.at) + ' · <b>' + esc(x.action) + '</b> ' + esc(x.entity || '') + ' #' + esc(x.entity_id || '') + (x.reason ? ' — ' + esc(x.reason) : '') + '</p>').join('') || '<p>No activity</p>'}</div>
+  </div>
+  <div class="card"><h3>Quick actions</h3><div class="row">
+    <button onclick="show('videos');setTimeout(()=>videoForm(),50)">➕ Add Video</button>
+    <button class="ghost" onclick="show('claims')">Review Claims (${d.claims.pending} pending)</button>
+    <button class="ghost" onclick="show('notifications')">Send Notification</button>
+    <button class="ghost" onclick="show('database')">Backup Database</button></div></div>`;
+};
+
+/* ---------- VIDEOS ---------- */
+let _videos = [], _cats = [];
+async function loadCats() { _cats = await api('GET', '/api/admin/categories'); return _cats; }
+VIEWS.videos = async () => {
+  await loadCats(); _videos = await api('GET', '/api/admin/videos');
+  $('#view').innerHTML = `<div class="card"><div class="row"><button onclick="videoForm()">➕ Add Video</button>
+    <input id="vq" placeholder="Search title…" oninput="renderVideos()" style="flex:2"></div></div>
+    <div id="vlist"></div><div id="vform"></div>`;
+  renderVideos();
+};
+function renderVideos() {
+  const q = ($('#vq') && $('#vq').value || '').toLowerCase();
+  const rows = _videos.filter(v => v.title.toLowerCase().includes(q));
+  $('#vlist').innerHTML = '<table><tr><th>ID</th><th>Title</th><th>Source</th><th>Access</th><th>Coins</th><th>Status</th><th>Views</th><th>Actions</th></tr>' +
+    rows.map(v => `<tr><td>${v.id}</td><td><b>${esc(v.title)}</b><br><span style="color:var(--grey)">${esc(v.category_name || '')} · ${esc(v.provider_name || '')}</span></td>
+    <td>${esc(v.source_type)}</td><td>${esc(v.access_type)}</td><td>${v.coin_price || 0}</td><td>${badge(v.status)}</td><td>${v.views}</td>
+    <td><button class="sm" onclick="videoForm(${v.id})">Edit</button> <button class="sm grey" onclick="dupVideo(${v.id})">Duplicate</button> <button class="sm danger" onclick="delVideo(${v.id})">Delete</button></td></tr>`).join('') + '</table>';
+}
+async function dupVideo(id) { await api('POST', '/api/admin/videos/' + id + '/duplicate'); toast('Duplicated'); VIEWS.videos(); }
+async function delVideo(id) { if (!confirm('Delete this video? Coin ledger, unlock and audit history are preserved.')) return; await api('DELETE', '/api/admin/videos/' + id); toast('Deleted'); VIEWS.videos(); }
+const AD_FIELDS = [['enabled','Enable ads for this video'],['native','Native placement eligible'],['preroll','Pre-roll (only if authorized video-ad integration)'],['midroll','Mid-roll (only if supported)'],['postroll','Post-roll (only if supported)'],['banner','Banner eligible'],['free_users','Free users see ads'],['pro_users','Pro users see ads'],['rewarded','Rewarded eligible'],['ad_free_override','Ad-free override (force no ads)']];
+function videoForm(id) {
+  const v = id ? _videos.find(x => x.id === id) : { title: '', description: '', thumb_url: '', source_type: 'mp4', source_url: '', category_id: _cats[0] && _cats[0].id, tags: '', language: 'Hindi', duration_sec: 0, status: 'published', access_type: 'free', coin_price: 0, pro_free: true, featured: false, is_short: false, provider_name: '', subtitles_url: '', warning: '', search_keywords: '', scheduled_at: '', expires_at: '', ads: { enabled: true, native: true, preroll: false, midroll: false, postroll: false, banner: true, max_freq: 3, min_interval_sec: 300, free_users: true, pro_users: false, rewarded: true, ad_free_override: false } };
+  const ads = v.ads || {};
+  $('#vform').innerHTML = `<div class="card"><h3>${id ? 'Edit' : 'Add'} Video</h3>
+  <div class="row"><div><label>Title *</label><input id="vf_title" value="${esc(v.title)}"></div>
+  <div><label>Provider / Channel name</label><input id="vf_provider" value="${esc(v.provider_name || '')}"></div></div>
+  <label>Description</label><textarea id="vf_desc" rows="2">${esc(v.description || '')}</textarea>
+  <div class="row"><div><label>Source type *</label><select id="vf_stype">${['mp4','hls','mkv','embed'].map(t => `<option ${t === v.source_type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+  <div style="flex:2"><label>Source URL * (MP4 / M3U8 / MKV / authorized embed — no upload)</label><input id="vf_surl" value="${esc(v.source_url || '')}"></div></div>
+  <div class="row"><div><label>Thumbnail URL</label><input id="vf_thumb" value="${esc(v.thumb_url || '')}"> ${upBtn("$('#vf_thumb')")}</div>
+  <div><label>Category</label><select id="vf_cat">${_cats.map(c => `<option value="${c.id}" ${c.id === v.category_id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+  <div><label>Language</label><input id="vf_lang" value="${esc(v.language || 'Hindi')}"></div></div>
+  <div class="row"><div><label>Tags (comma)</label><input id="vf_tags" value="${esc(v.tags || '')}"></div>
+  <div><label>Search keywords</label><input id="vf_kw" value="${esc(v.search_keywords || '')}"></div>
+  <div><label>Duration (sec)</label><input id="vf_dur" type="number" value="${v.duration_sec || 0}"></div></div>
+  <div class="row"><div><label>Status</label><select id="vf_status">${['published','draft','scheduled','archived'].map(t => `<option ${t === v.status ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+  <div><label>Scheduled at (ISO, optional)</label><input id="vf_sched" value="${esc(v.scheduled_at || '')}"></div>
+  <div><label>Expires at (ISO, optional)</label><input id="vf_exp" value="${esc(v.expires_at || '')}"></div></div>
+  <div class="row"><div><label>Subtitles URL (optional)</label><input id="vf_sub" value="${esc(v.subtitles_url || '')}"></div>
+  <div><label>Content warning (optional)</label><input id="vf_warn" value="${esc(v.warning || '')}"></div></div>
+  <div class="switch"><input type="checkbox" id="vf_feat" ${v.featured ? 'checked' : ''}> Featured</div>
+  <div class="switch"><input type="checkbox" id="vf_short" ${v.is_short ? 'checked' : ''}> Shorts eligible</div>
+  <h3>🔐 Access Control</h3>
+  <div class="row"><div><label>Access type</label><select id="vf_access">${[['free','Free'],['free_ads','Free with ads'],['pro','Pro-only'],['coin','Coin unlock'],['pro_coin','Pro + optional coin unlock']].map(t => `<option value="${t[0]}" ${t[0] === v.access_type ? 'selected' : ''}>${t[1]}</option>`).join('')}</select></div>
+  <div><label>Coin price (per video — REQUIRED for Coin / Pro+Coin)</label><input id="vf_price" type="number" min="0" value="${v.coin_price || 0}"></div></div>
+  <p style="font-size:12px;color:var(--grey)">Har video ki apni coin price yahin set hoti hai (e.g. ek video 10 coins, dusra 50). App kabhi price hardcode nahi karta — unlock ke time server isi stored price ko kaat-ta hai.</p>
+  <div class="switch"><input type="checkbox" id="vf_profree" ${v.pro_free ? 'checked' : ''}> Pro members can watch without spending coins</div>
+  <h3>📢 Ad Configuration (this video only)</h3>
+  <p style="font-size:12px;color:var(--grey)">Precedence (server-side resolved): legal/consent &gt; global shutdown &gt; this video's override &gt; category rules &gt; global defaults. Values shown are the effective (resolved) config for this video; saving stores them on this video. Source types supported: MP4, HLS/M3U8, MKV, authorized embed. Standard AdMob banner/native does not become pre-roll automatically; video ads apply only through a compatible authorized integration.</p>
+  ${AD_FIELDS.map(f => `<div class="switch"><input type="checkbox" class="ad_f" data-k="${f[0]}" ${ads[f[0]] ? 'checked' : ''} onchange="adsPreview()"> ${f[1]}</div>`).join('')}
+  <div class="row"><div><label>Max ad frequency</label><input id="ad_freq" type="number" value="${ads.max_freq != null ? ads.max_freq : 3}" oninput="adsPreview()"></div>
+  <div><label>Min interval between ads (sec)</label><input id="ad_int" type="number" value="${ads.min_interval_sec != null ? ads.min_interval_sec : 300}" oninput="adsPreview()"></div></div>
+  <label>Ad settings preview</label><pre id="ad_prev"></pre>
+  <div class="row"><button onclick="saveVideo(${id || 'null'})">${id ? 'Save Changes' : 'Create Video'}</button>
+  <button class="grey" onclick="document.querySelector('#vform').innerHTML=''">Cancel</button></div></div>`;
+  adsPreview();
+  document.querySelector('#vform').scrollIntoView({ behavior: 'smooth' });
+}
+function collectAds() { const o = {}; document.querySelectorAll('.ad_f').forEach(c => o[c.dataset.k] = c.checked); o.max_freq = +($('#ad_freq').value || 0); o.min_interval_sec = +($('#ad_int').value || 0); return o; }
+function adsPreview() { const el = $('#ad_prev'); if (el) el.textContent = JSON.stringify(collectAds(), null, 2); }
+async function saveVideo(id) {
+  const access = $('#vf_access').value, price = +$('#vf_price').value;
+  if ((access === 'coin' || access === 'pro_coin') && !(price > 0)) { alert('Coin price required: Coin / Pro+Coin videos ke liye is video ki coin price (> 0) set karo — har video ki price alag ho sakti hai.'); return; }
+  const body = { title: $('#vf_title').value, description: $('#vf_desc').value, provider_name: $('#vf_provider').value, source_type: $('#vf_stype').value, source_url: $('#vf_surl').value, thumb_url: $('#vf_thumb').value, category_id: +$('#vf_cat').value, language: $('#vf_lang').value, tags: $('#vf_tags').value, search_keywords: $('#vf_kw').value, duration_sec: +$('#vf_dur').value, status: $('#vf_status').value, scheduled_at: $('#vf_sched').value || null, expires_at: $('#vf_exp').value || null, subtitles_url: $('#vf_sub').value || null, warning: $('#vf_warn').value || null, featured: $('#vf_feat').checked, is_short: $('#vf_short').checked, access_type: access, coin_price: price, pro_free: $('#vf_profree').checked, ads: collectAds() };
+  try { if (id) await api('PUT', '/api/admin/videos/' + id, body); else await api('POST', '/api/admin/videos', body); toast('Video saved'); VIEWS.videos(); }
+  catch (e) { alert(e.message); }
+}
+
+/* ---------- CATEGORIES ---------- */
+VIEWS.categories = async () => {
+  const cats = await loadCats();
+  $('#view').innerHTML = `<div class="card"><h3>Add Category</h3>
+  <input type="hidden" id="cf_id"><div class="row"><div><label>Name</label><input id="cf_name"></div>
+  <div><label>Description</label><input id="cf_desc"></div><div><label>Thumbnail URL</label><input id="cf_thumb"> <button type="button" class="sm" onclick="pickUpload($('#cf_thumb'))">📷 Upload Photo</button></div>
+  <div><label>Sort</label><input id="cf_sort" type="number" value="0"></div></div>
+  <div class="row"><div><label>Default coin policy</label><select id="cf_coin"><option>inherit</option><option>free</option><option>coin</option><option>pro</option></select></div>
+  <div><label>Free/Pro visibility</label><select id="cf_vis2"><option>all</option><option>free</option><option>pro</option></select></div></div>
+  <div class="switch"><input type="checkbox" id="cf_vis" checked> Visible</div>
+  <div class="switch"><input type="checkbox" id="cf_home" checked> Show on Home</div>
+  <div class="switch"><input type="checkbox" id="cf_feeds" checked> Feeds eligible</div>
+  <div class="switch"><input type="checkbox" id="cf_shorts" checked> Shorts eligible</div>
+  <label>Default ads JSON</label><textarea id="cf_ads" rows="2">{}</textarea>
+  <p><button onclick="saveCategory()">Save Category</button> <button class="grey" onclick="VIEWS.categories()">Reset</button></p></div>
+  <table><tr><th>ID</th><th>Name</th><th>Sort</th><th>Visible</th><th>Coin policy</th><th>Actions</th></tr>
+  ${cats.map(c => `<tr><td>${c.id}</td><td><b>${esc(c.name)}</b><br><span style="color:var(--grey)">${esc(c.description || '')}</span></td><td>${c.sort}</td><td>${c.visible ? 'Yes' : 'No'}</td><td>${esc(c.default_coin_policy || 'inherit')}</td>
+  <td><button class="sm" onclick='editCategory(${JSON.stringify(c.id)})'>Edit</button> <button class="sm danger" onclick="delCategory(${c.id})">Delete</button></td></tr>`).join('')}</table>`;
+};
+function editCategory(id) { const c = _cats.find(x => x.id === id); if (!c) return; $('#cf_id').value = c.id; $('#cf_name').value = c.name; $('#cf_desc').value = c.description || ''; $('#cf_thumb').value = c.thumb_url || ''; $('#cf_sort').value = c.sort; $('#cf_coin').value = c.default_coin_policy || 'inherit'; $('#cf_vis2').value = c.free_pro_visibility || 'all'; $('#cf_ads').value = c.default_ads || '{}'; $('#cf_vis').checked = !!c.visible; $('#cf_home').checked = !!c.home; $('#cf_feeds').checked = !!c.feeds; $('#cf_shorts').checked = !!c.shorts; window.scrollTo(0, 0); }
+async function saveCategory() {
+  let ads; try { ads = JSON.parse($('#cf_ads').value || '{}'); } catch (e) { return alert('Default ads must be valid JSON'); }
+  const body = { name: $('#cf_name').value, description: $('#cf_desc').value, thumb_url: $('#cf_thumb').value, sort: +$('#cf_sort').value, default_coin_policy: $('#cf_coin').value, free_pro_visibility: $('#cf_vis2').value, default_ads: ads, visible: $('#cf_vis').checked ? 1 : 0, home: $('#cf_home').checked ? 1 : 0, feeds: $('#cf_feeds').checked ? 1 : 0, shorts: $('#cf_shorts').checked ? 1 : 0 };
+  const id = $('#cf_id').value;
+  try { if (id) await api('PUT', '/api/admin/categories/' + id, body); else await api('POST', '/api/admin/categories', body); toast('Category saved'); VIEWS.categories(); } catch (e) { alert(e.message); }
+}
+async function delCategory(id) { if (!confirm('Delete category?')) return; await api('DELETE', '/api/admin/categories/' + id); VIEWS.categories(); }
+
+/* ---------- FEEDS ---------- */
+VIEWS.feeds = async () => {
+  const [cols, vids] = await Promise.all([api('GET', '/api/admin/feeds'), api('GET', '/api/admin/videos')]);
+  window._feedVids = vids;
+  $('#view').innerHTML = `<div class="card"><h3>Create Feed Collection</h3>
+  <div class="row"><div><label>Title</label><input id="ff_title"></div>
+  <div><label>Layout</label><select id="ff_layout"><option>vertical</option><option>compact</option></select></div>
+  <div><label>Sort</label><input id="ff_sort" type="number" value="0"></div></div>
+  <label>Description</label><input id="ff_desc">
+  <label>Video IDs (comma separated, in display order)</label><input id="ff_items" placeholder="e.g. 1,2,3">
+  <p style="font-size:12px;color:var(--grey)">Available: ${vids.map(v => v.id + '·' + esc(v.title)).join('  |  ')}</p>
+  <button onclick="saveFeed(null)">Create Collection</button></div>
+  ${cols.map(c => `<div class="card"><h3>${esc(c.title)} <span class="badge">${esc(c.layout)}</span> ${c.visible ? '' : '<span class="badge red">hidden</span>'}</h3>
+  <p style="color:var(--grey)">${esc(c.description || '')} · ${c.items.length} videos · IDs: ${c.items.map(i => i.video_id).join(', ')}</p>
+  <label>Video IDs (comma separated)</label><input id="ff_items_${c.id}" value="${c.items.sort((a,b)=>a.sort-b.sort).map(i => i.video_id).join(',')}">
+  <div class="switch"><input type="checkbox" id="ff_vis_${c.id}" ${c.visible ? 'checked' : ''}> Visible (Feeds ads inherit global + per-video config; feed placements are independent of Home)</div>
+  <p><button class="sm" onclick="saveFeed(${c.id})">Save</button> <button class="sm danger" onclick="delFeed(${c.id})">Delete</button></p></div>`).join('')}`;
+};
+async function saveFeed(id) {
+  const parse = s => s.split(',').map(x => parseInt(x.trim())).filter(x => x > 0).map((vid, i) => ({ video_id: vid, sort: i }));
+  try {
+    if (id) await api('PUT', '/api/admin/feeds/' + id, { items: parse($('#ff_items_' + id).value), visible: $('#ff_vis_' + id).checked });
+    else await api('POST', '/api/admin/feeds', { title: $('#ff_title').value, description: $('#ff_desc').value, layout: $('#ff_layout').value, sort: +$('#ff_sort').value, items: parse($('#ff_items').value) });
+    toast('Feed saved'); VIEWS.feeds();
+  } catch (e) { alert(e.message); }
+}
+async function delFeed(id) { if (!confirm('Delete collection?')) return; await api('DELETE', '/api/admin/feeds/' + id); VIEWS.feeds(); }
+
+/* ---------- HOME SECTIONS ---------- */
+VIEWS.home = async () => {
+  const secs = await api('GET', '/api/admin/home-sections');
+  window._secs = secs;
+  $('#view').innerHTML = `<div class="card"><h3>Home Sections (remote — no app update needed)</h3>
+  <table><tr><th>Key</th><th>Title</th><th>Visible</th><th>Sort</th></tr>
+  ${secs.map((s, i) => `<tr><td><code>${esc(s.key)}</code></td><td><input id="hs_t_${i}" value="${esc(s.title)}"></td>
+  <td><input type="checkbox" id="hs_v_${i}" ${s.visible ? 'checked' : ''} style="width:auto"></td>
+  <td><input type="number" id="hs_s_${i}" value="${s.sort}" style="width:80px"></td></tr>`).join('')}</table>
+  <p><button onclick="saveSections()">Save Sections</button></p>
+  <p style="font-size:12px;color:var(--grey)">Live preview: open <a href="/api/home" target="_blank">/api/home</a> — this is exactly what the Android app renders.</p></div>`;
+};
+async function saveSections() {
+  const sections = window._secs.map((s, i) => ({ key: s.key, title: $('#hs_t_' + i).value, visible: $('#hs_v_' + i).checked, sort: +$('#hs_s_' + i).value }));
+  await api('PUT', '/api/admin/home-sections', { sections }); toast('Sections saved');
+}
+
+/* ---------- USERS ---------- */
+VIEWS.users = async () => {
+  $('#view').innerHTML = `<div class="card"><div class="row">
+  <input id="uq" placeholder="Search by ID, name or email…" style="flex:2">
+  <select id="uf"><option value="all">All users</option><option value="free">Free</option><option value="pro">Pro</option><option value="guests">Guests</option><option value="suspended">Suspended</option><option value="recent">Recently active</option><option value="pending_claims">With pending claims</option></select>
+  <button onclick="loadUsers()">Search</button></div></div><div id="ulist"></div>`;
+  loadUsers();
+};
+async function loadUsers() {
+  const users = await api('GET', '/api/admin/users?filter=' + encodeURIComponent($('#uf').value) + '&q=' + encodeURIComponent($('#uq').value));
+  $('#ulist').innerHTML = '<table><tr><th>ID</th><th>User</th><th>Type</th><th>Pro</th><th>Coins</th><th>Status</th><th>Last active</th><th></th></tr>' +
+    users.map(u => `<tr><td>${u.id}</td><td><b>${esc(u.name)}</b><br><span style="color:var(--grey)">${esc(u.email || 'guest')}</span></td>
+    <td>${u.is_guest ? 'Guest' : esc(u.provider || 'email')}</td><td>${u.is_pro ? '<span class="badge green">PRO</span>' : 'Free'}</td><td><b>${u.coins}</b></td><td>${badge(u.status)}</td><td>${esc(u.last_active_at || '-')}</td>
+    <td><button class="sm" onclick="userDrawer(${u.id})">Open</button></td></tr>`).join('') + '</table>';
+}
+async function userDrawer(id) {
+  const d = await api('GET', '/api/admin/users/' + id);
+  const u = d.user;
+  openDrawer(`<button class="grey sm" onclick="closeDrawer()">✕ Close</button>
+  <h3>${esc(u.name)} <span class="badge">${u.is_guest ? 'Guest' : 'Registered'}</span></h3>
+  <p style="color:var(--grey)">${esc(u.email || '-')} · ID ${u.id} · Provider ${esc(u.provider || '-')}<br>
+  Pro: ${u.is_pro ? 'Yes (till ' + esc(u.pro_expiry || '∞') + ')' : 'No'} · Coins: <b>${u.coins}</b> · Status: ${u.status}<br>
+  Watch time: ${d.watch_time_sec}s · History entries: ${d.history_count} · Unlocked videos: ${d.unlocks.length} · Claims: ${d.claims.length}</p>
+  <div class="card"><h4>👑 Pro entitlement</h4><label>Days</label><input id="ud_days" type="number" value="30">
+  <label>Reason (mandatory, audited)</label><input id="ud_reason" placeholder="e.g. promo / compensation">
+  <p><button class="sm" onclick="userPro(${id},'grant')">Grant Pro</button> <button class="sm danger" onclick="userPro(${id},'revoke')">Revoke Pro</button></p></div>
+  <div class="card"><h4>🪙 Adjust coins</h4><label>Amount (+ credit / − debit)</label><input id="ud_coins" type="number" value="0">
+  <label>Reason (mandatory, ledger entry created)</label><input id="ud_creason">
+  <p><button class="sm" onclick="userCoins(${id})">Apply Adjustment</button></p></div>
+  <div class="card"><h4>⛔ Account</h4><label>Reason (mandatory)</label><input id="ud_sreason">
+  <p><button class="sm danger" onclick="userSuspend(${id},true)">Suspend</button> <button class="sm grey" onclick="userSuspend(${id},false)">Restore</button></p></div>
+  <div class="card"><h4>Coin ledger</h4>${d.ledger.map(l => '<p style="font-size:12px">#' + l.id + ' ' + esc(l.type) + ' <b>' + (l.amount > 0 ? '+' : '') + l.amount + '</b> → bal ' + l.balance_after + ' · ' + esc(l.created_at) + '</p>').join('') || '<p>None</p>'}</div>
+  <div class="card"><h4>Claims</h4>${d.claims.map(c => '<p style="font-size:12px">#' + c.id + ' ' + esc(c.method) + ' ' + c.amount + ' ' + esc(c.currency) + ' — ' + c.status + '</p>').join('') || '<p>None</p>'}</div>
+  <p style="font-size:12px;color:var(--grey)">Read-only support view. Passwords, tokens and payment secrets are never shown. All actions on this panel are audit-logged with reasons.</p>`);
+}
+async function userPro(id, action) { const reason = $('#ud_reason').value; if (!reason) return alert('Reason is mandatory'); try { await api('POST', '/api/admin/users/' + id + '/pro', { action, reason, days: +($('#ud_days').value || 30) }); toast('Pro ' + action + ' done'); userDrawer(id); loadUsers(); } catch (e) { alert(e.message); } }
+async function userCoins(id) { const reason = $('#ud_creason').value; const amount = +$('#ud_coins').value; if (!reason) return alert('Reason is mandatory'); try { const r = await api('POST', '/api/admin/users/' + id + '/coins', { amount, reason }); toast('New balance: ' + r.balance); userDrawer(id); loadUsers(); } catch (e) { alert(e.message); } }
+async function userSuspend(id, s) { const reason = $('#ud_sreason').value; if (!reason) return alert('Reason is mandatory'); try { await api('POST', '/api/admin/users/' + id + '/suspend', { suspended: s, reason }); toast(s ? 'Suspended' : 'Restored'); userDrawer(id); loadUsers(); } catch (e) { alert(e.message); } }
+
+/* ---------- PLANS & PACKAGES ---------- */
+function crudView(cfg) {
+  return async () => {
+    const rows = await api('GET', cfg.api);
+    window['_rows_' + cfg.key] = rows;
+    $('#view').innerHTML = `<div class="card"><h3>${cfg.addTitle}</h3><input type="hidden" id="${cfg.key}_id">
+    ${cfg.fields.map(f => `<label>${f[1]}</label>${f[2] === 'check' ? `<input type="checkbox" id="${cfg.key}_${f[0]}" checked>` : f[2] === 'area' ? `<textarea id="${cfg.key}_${f[0]}" rows="2"></textarea>` : `<input id="${cfg.key}_${f[0]}" ${f[2] === 'num' ? 'type="number"' : ''}>`}`).join('')}
+    <p><button onclick="saveCrud('${cfg.key}')">Save</button> <button class="grey" onclick="show('${cfg.key}')">Reset</button></p></div>
+    <table><tr>${cfg.cols.map(c => '<th>' + c[1] + '</th>').join('')}<th>Actions</th></tr>
+    ${rows.map(r => `<tr>${cfg.cols.map(c => '<td>' + esc(r[c[0]]) + '</td>').join('')}<td><button class="sm" onclick="editCrud('${cfg.key}',${r.id})">Edit</button> <button class="sm danger" onclick="delCrud('${cfg.key}',${r.id})">Delete</button></td></tr>`).join('')}</table>`;
+    if (cfg.after) cfg.after();
+  };
+}
+const CRUDS = {
+  plans: { key: 'plans', api: '/api/admin/plans', addTitle: 'Pro Plan', fields: [['name','Name'],['duration_days','Duration (days)','num'],['price','Price','num'],['currency','Currency'],['benefits','Benefits','area'],['coin_discount_pct','Coin discount %','num'],['sort','Sort','num'],['enabled','Enabled','check'],['ad_free','Ad-free','check'],['pro_access','Pro video access','check']], cols: [['id','ID'],['name','Name'],['duration_days','Days'],['price','Price'],['currency','Cur'],['enabled','Enabled']] },
+  packages: { key: 'packages', api: '/api/admin/packages', addTitle: 'Coin Package (total = base + bonus, validated on save)', fields: [['name','Name'],['base_coins','Base coins','num'],['bonus_coins','Bonus coins','num'],['price','Price','num'],['currency','Currency'],['sort','Sort','num'],['popular','Popular badge','check'],['enabled','Enabled','check']], cols: [['id','ID'],['name','Name'],['base_coins','Base'],['bonus_coins','Bonus'],['total_coins','Total'],['price','Price'],['popular','Popular'],['enabled','Enabled']] }
+};
+VIEWS.plans = crudView(CRUDS.plans);
+VIEWS.packages = crudView(CRUDS.packages);
+function editCrud(key, id) { const cfg = CRUDS[key]; const r = (window['_rows_' + key] || []).find(x => x.id === id); if (!r) return; document.querySelector('#' + key + '_id').value = id; cfg.fields.forEach(f => { const el = document.querySelector('#' + key + '_' + f[0]); if (!el) return; if (f[2] === 'check') el.checked = !!r[f[0]]; else el.value = r[f[0]] != null ? r[f[0]] : ''; }); window.scrollTo(0, 0); }
+async function saveCrud(key) {
+  const cfg = CRUDS[key]; const body = {};
+  cfg.fields.forEach(f => { const el = document.querySelector('#' + key + '_' + f[0]); if (!el) return; body[f[0]] = f[2] === 'check' ? (el.checked ? 1 : 0) : f[2] === 'num' ? +el.value : el.value; });
+  if (key === 'packages') { body.total_coins = (body.base_coins || 0) + (body.bonus_coins || 0); }
+  const id = document.querySelector('#' + key + '_id').value;
+  try { if (id) await api('PUT', cfg.api + '/' + id, body); else await api('POST', cfg.api, body); toast('Saved'); show(key); } catch (e) { alert(e.message); }
+}
+async function delCrud(key, id) { if (!confirm('Delete?')) return; await api('DELETE', CRUDS[key].api + '/' + id); show(key); }
+
+/* ---------- CLAIMS ---------- */
+VIEWS.claims = async () => {
+  const claims = await api('GET', '/api/admin/claims');
+  $('#view').innerHTML = `<div class="card"><p>Manual payment claims. <b>Approve only after verifying the payment independently</b> — crediting is atomic and happens exactly once. Duplicate UTRs are rejected at submission.</p></div>
+  <table><tr><th>ID</th><th>User</th><th>Item</th><th>Amount</th><th>Method</th><th>UTR</th><th>Status</th><th>Submitted</th><th>Actions</th></tr>
+  ${claims.map(c => `<tr><td>${c.id}</td><td>${esc(c.user_name)}<br><span style="color:var(--grey)">${esc(c.user_email || '')}</span></td>
+  <td>${esc(c.package_name || c.plan_name || '-')}</td><td>${c.amount} ${esc(c.currency)}</td><td>${esc(c.method)}</td><td><code>${esc(c.utr)}</code></td>
+  <td>${badge(c.status)}${c.review_reason ? '<br><span style="color:var(--grey)">' + esc(c.review_reason) + '</span>' : ''}</td><td>${esc(c.created_at)}</td>
+  <td>${c.status === 'pending' ? `<button class="sm" onclick="approveClaim(${c.id})">Approve</button> <button class="sm danger" onclick="rejectClaim(${c.id})">Reject</button>` : ''}</td></tr>`).join('')}</table>`;
+};
+async function approveClaim(id) { const note = prompt('Verification note (e.g. matched in bank/UPI statement):'); if (note === null) return; try { const r = await api('POST', '/api/admin/claims/' + id + '/approve', { note }); toast('Approved. Credited: ' + (r.credited_coins || 0) + ' coins'); VIEWS.claims(); } catch (e) { alert(e.message); } }
+async function rejectClaim(id) { const reason = prompt('Rejection reason (mandatory):'); if (!reason) return; try { await api('POST', '/api/admin/claims/' + id + '/reject', { reason }); toast('Rejected'); VIEWS.claims(); } catch (e) { alert(e.message); } }
+
+/* ---------- LEDGER ---------- */
+VIEWS.ledger = async () => {
+  $('#view').innerHTML = `<div class="card"><div class="row"><input id="lg_u" placeholder="User ID (optional)"><input id="lg_t" placeholder="Type: checkin / unlock / purchase / admin_adjust…"><button onclick="loadLedger()">Filter</button></div>
+  <p style="font-size:12px;color:var(--grey)">Append-only ledger. Corrections happen via compensating admin adjustments — history is never edited or erased.</p></div><div id="lglist"></div>`;
+  loadLedger();
+};
+async function loadLedger() {
+  const rows = await api('GET', '/api/admin/ledger?user_id=' + encodeURIComponent($('#lg_u').value) + '&type=' + encodeURIComponent($('#lg_t').value));
+  $('#lglist').innerHTML = '<table><tr><th>ID</th><th>User</th><th>Type</th><th>Amount</th><th>Balance before → after</th><th>Ref</th><th>Source</th><th>When</th></tr>' +
+    rows.map(l => `<tr><td>${l.id}</td><td>${l.user_id}</td><td>${esc(l.type)}</td><td><b>${l.amount > 0 ? '+' : ''}${l.amount}</b></td><td>${l.balance_before} → ${l.balance_after}</td><td>${esc(l.ref_type || '')} ${esc(l.ref_id || '')}</td><td>${esc(l.source || '')}</td><td>${esc(l.created_at)}</td></tr>`).join('') + '</table>';
+}
+
+/* ---------- REWARDS ---------- */
+VIEWS.rewards = async () => {
+  const cfg = await api('GET', '/api/admin/rewards-config');
+  window._rcfg = cfg;
+  $('#view').innerHTML = `<div class="card"><h3>Reward Configuration</h3>
+  <label>Daily check-in amounts (comma separated, by streak day)</label>
+  <input id="rw_amounts" value="${(cfg.checkin_amounts || []).join(',')}">
+  ${Object.entries(cfg.tasks || {}).map(([k, t]) => `<div class="card" style="margin-top:10px"><div class="switch"><input type="checkbox" id="rw_on_${k}" ${t.enabled ? 'checked' : ''}> <b>${esc(t.title || k)}</b> (${esc(k)})</div>
+  <div class="row"><div><label>Amount</label><input type="number" id="rw_amt_${k}" value="${t.amount != null ? t.amount : ''}"></div>
+  <div><label>Daily limit</label><input type="number" id="rw_lim_${k}" value="${t.daily_limit != null ? t.daily_limit : ''}"></div></div>
+  ${t.note ? '<p style="font-size:12px;color:var(--warn)">' + esc(t.note) + '</p>' : ''}</div>`).join('')}
+  <p><button onclick="saveRewards()">Save Reward Config</button></p>
+  <p style="font-size:12px;color:var(--grey)">Rewarded-ad coins are granted only after verified ad callbacks + server validation — never for clicking Play.</p></div>`;
+};
+async function saveRewards() {
+  const cfg = JSON.parse(JSON.stringify(window._rcfg));
+  cfg.checkin_amounts = $('#rw_amounts').value.split(',').map(x => +x.trim()).filter(x => x >= 0);
+  Object.keys(cfg.tasks || {}).forEach(k => { cfg.tasks[k].enabled = $('#rw_on_' + k).checked; const a = $('#rw_amt_' + k).value; if (a !== '') cfg.tasks[k].amount = +a; const l = $('#rw_lim_' + k).value; if (l !== '') cfg.tasks[k].daily_limit = +l; });
+  await api('PUT', '/api/admin/rewards-config', cfg); toast('Rewards config saved');
+}
+
+/* ---------- NOTIFICATIONS ---------- */
+VIEWS.notifications = async () => {
+  const list = await api('GET', '/api/admin/notifications');
+  $('#view').innerHTML = `<div class="card"><h3>Notification Composer</h3>
+  <div class="row"><div><label>Title</label><input id="nt_title"></div>
+  <div><label>Audience</label><select id="nt_aud"><option value="all">All eligible users</option><option value="free">Free users</option><option value="pro">Pro users</option><option value="expired_pro">Expired Pro</option><option value="pending_claims">Users with pending claims</option><option value="category">Category segment</option><option value="user">Individual user (ID below)</option></select></div>
+  <div><label>Target User ID (only for Individual)</label><input id="nt_target" type="number" placeholder="e.g. 2"></div></div>
+  <label>Message</label><textarea id="nt_body" rows="2"></textarea>
+  <div class="row"><div><label>Image URL (optional)</label><input id="nt_img"></div>
+  <div><label>Deep link (optional, e.g. raaz://video/3)</label><input id="nt_link"></div>
+  <div><label>Schedule at (ISO, optional)</label><input id="nt_sched"></div></div>
+  <p><button onclick="sendNotif()">Record Campaign</button></p>
+  <p style="font-size:12px;color:var(--warn)">Status stays “awaiting_provider” until OneSignal credentials are configured server-side. Campaigns are recorded either way.</p></div>
+  <table><tr><th>ID</th><th>Title</th><th>Audience</th><th>Status</th><th>Created</th></tr>
+  ${list.map(n => `<tr><td>${n.id}</td><td><b>${esc(n.title)}</b><br><span style="color:var(--grey)">${esc(n.body)}</span></td><td>${esc(n.audience)}${n.target_user_id ? ' → user #' + n.target_user_id : ''}</td><td>${badge(n.status)}</td><td>${esc(n.created_at)}</td></tr>`).join('')}</table>`;
+};
+async function sendNotif() { const aud = $('#nt_aud').value; const body = { title: $('#nt_title').value, body: $('#nt_body').value, image_url: $('#nt_img').value || null, deep_link: $('#nt_link').value || null, audience: aud, scheduled_at: $('#nt_sched').value || null }; if (aud === 'user') { const t = +$('#nt_target').value; if (!t) return alert('Individual audience ke liye Target User ID required hai'); body.target_user_id = t; } try { const r = await api('POST', '/api/admin/notifications', body); toast('Recorded (' + r.status + ')'); VIEWS.notifications(); } catch (e) { alert(e.message); } }
+
+/* ---------- SETTINGS / VERSION / BRANDING / PAYCONFIG ---------- */
+const TOGGLES = ['service_enabled','maintenance','home_enabled','shorts_enabled','feeds_enabled','search_enabled','subscriptions_enabled','library_enabled','playback_enabled','mp4_enabled','hls_enabled','mkv_enabled','pro_purchase_enabled','coin_purchase_enabled','coin_unlock_enabled','rewarded_ads_enabled','admob_enabled','feeds_ads_enabled','feeds_native_ads','notifications_enabled','guest_browsing','google_signin_enabled','email_signin_enabled','pay_manual_enabled','pay_paypal_enabled','pay_paytm_enabled'];
+VIEWS.settings = async () => {
+  const s = await api('GET', '/api/admin/settings');
+  $('#view').innerHTML = `<div class="card"><h3>Remote App Settings (Super Admin)</h3>
+  <p style="font-size:12px;color:var(--grey)">The Android app fetches these on launch. If the backend is unreachable the app uses a safe cached config and never grants premium access offline.</p>
+  ${TOGGLES.map(k => `<div class="switch"><input type="checkbox" class="stg" data-k="${k}" ${s[k] === '1' ? 'checked' : ''}> ${k}</div>`).join('')}
+  <label>Maintenance message</label><input id="st_msg" value="${esc(s.maintenance_message || '')}">
+  <label>AdMob App ID (ads activate when a real ID is set)</label><input id="st_admob" value="${esc(s.admob_app_id || '')}" placeholder="ca-app-pub-…">
+  <label>Feeds ad frequency (har kitne cards ke baad ek ad slot)</label><input id="st_ffreq" type="number" value="${esc(s.feeds_ad_frequency || '4')}">
+  <p style="font-size:12px;color:var(--grey)">AdMob precedence: legal/consent &gt; global off (admob_enabled) &gt; per-video override &gt; category default_ads &gt; global defaults. Feeds ads yahin se independently control hote hain.</p>
+  <p><button onclick="saveSettings()">Save Settings</button></p></div>`;
+};
+async function saveSettings() { const body = { maintenance_message: $('#st_msg').value, admob_app_id: $('#st_admob').value, feeds_ad_frequency: $('#st_ffreq').value }; document.querySelectorAll('.stg').forEach(c => body[c.dataset.k] = c.checked ? '1' : '0'); await api('PUT', '/api/admin/settings', body); toast('Settings saved'); }
+VIEWS.version = async () => {
+  const v = await api('GET', '/api/admin/version');
+  $('#view').innerHTML = `<div class="card"><h3>App Version Control</h3>
+  <div class="row"><div><label>Latest version name</label><input id="vv_name" value="${esc(v.latest_name)}"></div>
+  <div><label>Latest code</label><input id="vv_code" type="number" value="${v.latest_code}"></div>
+  <div><label>Minimum supported code</label><input id="vv_min" type="number" value="${v.min_code}"></div></div>
+  <div class="switch"><input type="checkbox" id="vv_force" ${v.force_update ? 'checked' : ''}> Force update (blocks app below minimum code)</div>
+  <label>Play Store URL</label><input id="vv_url" value="${esc(v.store_url || '')}">
+  <label>Release notes</label><textarea id="vv_notes" rows="2">${esc(v.release_notes || '')}</textarea>
+  <p><button onclick="saveVersion()">Save</button></p>
+  <p style="font-size:12px;color:var(--grey)">Optional update = user may continue. Force update = block below min code. No silent APK installation.</p></div>`;
+};
+async function saveVersion() { await api('PUT', '/api/admin/version', { latest_name: $('#vv_name').value, latest_code: +$('#vv_code').value, min_code: +$('#vv_min').value, force_update: $('#vv_force').checked, store_url: $('#vv_url').value, release_notes: $('#vv_notes').value }); toast('Version saved'); }
+VIEWS.branding = async () => {
+  const b = await api('GET', '/api/admin/branding');
+  const F = [['app_name','App name'],['primary_color','Primary color'],['tagline','Tagline'],['logo_url','Logo URL (dynamic, in-app)'],['splash_url','Splash artwork URL (where supported)'],['home_banner_url','Home banner URL'],['default_avatar_url','Default avatar URL'],['placeholder_thumb_url','Placeholder thumbnail URL']];
+  $('#view').innerHTML = `<div class="card"><h3>Branding</h3>
+  ${F.map(f => `<label>${f[1]}</label><input class="brf" data-k="${f[0]}" value="${esc(b[f[0]] || '')}">${['logo_url','splash_url','home_banner_url','default_avatar_url','placeholder_thumb_url'].includes(f[0]) ? ' <button type="button" class="sm" onclick="pickUpload(this.previousElementSibling)">📷 Upload Photo</button>' : ''}`).join('')}
+  <p><button onclick="saveBranding()">Save Branding</button></p>
+  <p style="font-size:12px;color:var(--warn)">Note: changing the native Android launcher icon or native splash requires a NEW app build/release. The values here control dynamic in-app branding only — the panel never promises instant native replacement.</p></div>`;
+};
+async function saveBranding() { const body = {}; document.querySelectorAll('.brf').forEach(i => body[i.dataset.k] = i.value); await api('PUT', '/api/admin/branding', body); toast('Branding saved'); }
+VIEWS.payconfig = async () => {
+  const p = await api('GET', '/api/admin/payment-config');
+  const F = [['qr_url','Payment QR image URL'],['payee_name','Payee display name'],['upi_id','UPI ID'],['instructions','Payment instructions'],['help_text','Help text'],['claim_expiry_hours','Claim expiry (hours)'],['paypal_mode','PayPal mode (sandbox/production)'],['paypal_client_id','PayPal client ID'],['paypal_secret','PayPal secret (server-side only)'],['paytm_mode','Paytm mode (sandbox/production)'],['paytm_mid','Paytm MID'],['paytm_key','Paytm key (server-side only)'],['onesignal_app_id','OneSignal App ID (push notifications)'],['onesignal_api_key','OneSignal API key (server-side only — masked)']];
+  $('#view').innerHTML = `<div class="card"><h3>Payment Configuration (Super Admin)</h3>
+  <p style="font-size:12px;color:var(--grey)">Manual QR/UPI flow is active when <code>pay_manual_enabled</code> is on in App Settings. PayPal/Paytm stay disabled until credentials + webhook verification are completed — a payment is never marked successful from a redirect/callback alone.</p>
+  ${F.map(f => `<label>${f[1]}</label><input class="pcf" data-k="${f[0]}" value="${esc(p[f[0]] || '')}">${f[0] === 'qr_url' ? ' <button type="button" class="sm" onclick="pickUpload(this.previousElementSibling)">📷 Upload QR Photo</button>' : ''}`).join('')}
+  <p><button onclick="savePayConfig()">Save Payment Config</button></p></div>`;
+};
+async function savePayConfig() { const body = {}; document.querySelectorAll('.pcf').forEach(i => body[i.dataset.k] = i.value); await api('PUT', '/api/admin/payment-config', body); toast('Payment config saved'); }
+
+/* ---------- REPORTS / AUDIT / DATABASE / DOCS ---------- */
+VIEWS.reports = async () => {
+  const rows = await api('GET', '/api/admin/reports');
+  $('#view').innerHTML = `<table><tr><th>ID</th><th>Video</th><th>Reason</th><th>By user</th><th>Status</th><th>Resolution</th><th>Actions</th></tr>
+  ${rows.map(r => `<tr><td>${r.id}</td><td>${esc(r.video_title || ('#' + (r.video_id || '-')))}</td><td>${esc(r.reason)}</td><td>${r.user_id || 'guest'}</td><td>${badge(r.status)}</td><td>${esc(r.resolution || '')}</td>
+  <td>${r.status === 'open' ? `<button class="sm danger" onclick="resolveReport(${r.id},'hide_video')">Hide video</button> <button class="sm" onclick="resolveReport(${r.id},'restore')">Restore</button> <button class="sm grey" onclick="resolveReport(${r.id},'dismiss')">Dismiss</button>` : ''}</td></tr>`).join('')}</table>`;
+};
+async function resolveReport(id, action) { const reason = prompt('Moderation reason:') || ''; try { await api('POST', '/api/admin/reports/' + id + '/resolve', { action, reason }); toast('Resolved'); VIEWS.reports(); } catch (e) { alert(e.message); } }
+VIEWS.audit = async () => {
+  const rows = await api('GET', '/api/admin/audit');
+  $('#view').innerHTML = `<div class="card"><p>Append-only audit log (Super Admin / Auditor). Ordinary admins cannot alter history.</p></div>
+  <table><tr><th>ID</th><th>When</th><th>Admin</th><th>Action</th><th>Entity</th><th>Reason</th><th>Detail</th></tr>
+  ${rows.map(r => `<tr><td>${r.id}</td><td>${esc(r.at)}</td><td>${r.admin_id}</td><td><b>${esc(r.action)}</b></td><td>${esc(r.entity || '')} #${esc(r.entity_id || '')}</td><td>${esc(r.reason || '')}</td><td style="font-size:11px">${esc(r.detail || '')}</td></tr>`).join('')}</table>`;
+};
+VIEWS.database = async () => {
+  const backs = await api('GET', '/api/admin/db/backups').catch(() => []);
+  $('#view').innerHTML = `<div class="card"><h3>SQL Export</h3>
+  <p>Downloads the full relational data as .sql. <b>Password hashes, admin accounts, sessions and payment secrets are excluded</b> (user rows export with password_hash NULL).</p>
+  <button onclick="exportSql()">⬇ Download raaz-export.sql</button></div>
+  <div class="card"><h3>SQL Import (Super Admin)</h3>
+  <label>Mode</label><select id="db_mode"><option value="merge">Merge (insert-or-ignore, stable IDs)</option><option value="restore">Full restore (replaces app data — mandatory backup first)</option></select>
+  <label>Paste .sql content (only INSERT statements into known Raaz tables are accepted; validated before applying)</label>
+  <textarea id="db_sql" rows="8" placeholder="INSERT INTO categories (...) VALUES (...);"></textarea>
+  <div class="switch"><input type="checkbox" id="db_confirm"> I confirm — a pre-import backup (.db + .sql snapshot) is created automatically and the import runs in a transaction</div>
+  <p><button class="danger" onclick="importSql()">Validate & Import</button></p><div id="db_result"></div></div>
+  <div class="card"><h3>Backup history</h3>${backs.map(x => '<p>#' + x.id + ' ' + esc(x.filename) + ' · ' + esc(x.created_at) + ' · ' + esc(x.note || '') + '</p>').join('') || '<p>No backups recorded yet</p>'}</div>`;
+};
+async function exportSql() {
+  const r = await fetch('/api/admin/db/export.sql', { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+  if (!r.ok) { alert('Export failed (super admin only)'); return; }
+  const blob = await r.blob(); const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'raaz-export.sql'; a.click(); toast('Export downloaded');
+}
+async function importSql() {
+  if (!$('#db_confirm').checked) return alert('Please tick the confirmation first');
+  try { const r = await api('POST', '/api/admin/db/import', { sql: $('#db_sql').value, mode: $('#db_mode').value, confirm: true });
+    $('#db_result').innerHTML = '<div class="msg">✅ Imported: ' + r.inserted + ' · Skipped: ' + r.skipped + ' · Backup: ' + esc(r.backup) + '</div>';
+  } catch (e) { $('#db_result').innerHTML = '<div class="msg" style="background:#fdeaea">❌ ' + esc(e.message) + '</div>'; }
+}
+VIEWS.docs = () => { $('#view').innerHTML = '<div class="card"><p>Full API documentation (app + admin endpoints, roles, money rules):</p><p><a href="/api/docs" target="_blank"><button>Open API Docs ↗</button></a></p></div>'; };
+
+if (TOKEN && ADMIN) boot();
+</script>
+</body></html>
