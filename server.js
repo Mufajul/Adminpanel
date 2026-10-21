@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS reward_claims(id INTEGER PRIMARY KEY AUTOINCREMENT,us
 CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT,body TEXT,image_url TEXT,deep_link TEXT,audience TEXT,status TEXT DEFAULT 'awaiting_provider',scheduled_at TEXT,sent_at TEXT,created_by INTEGER,created_at TEXT);
 CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY,value TEXT,updated_by INTEGER,updated_at TEXT);
 CREATE TABLE IF NOT EXISTS app_version(id INTEGER PRIMARY KEY CHECK(id=1),latest_name TEXT,latest_code INTEGER,min_code INTEGER,force_update INTEGER DEFAULT 0,store_url TEXT,release_notes TEXT);
+CREATE TABLE IF NOT EXISTS ad_networks(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT);
 CREATE TABLE IF NOT EXISTS branding(key TEXT PRIMARY KEY,value TEXT);
 CREATE TABLE IF NOT EXISTS payment_config(key TEXT PRIMARY KEY,value TEXT);
 CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,video_id INTEGER,reason TEXT,status TEXT DEFAULT 'open',created_at TEXT,resolved_by INTEGER,resolution TEXT);
@@ -214,6 +215,8 @@ function seed() {
   };
   const insSet = db.prepare('INSERT OR IGNORE INTO app_settings(key,value) VALUES(?,?)');
   for (const [k, v] of Object.entries(defaults)) insSet.run(k, v);
+  // Literal defaults (AD_NETWORKS_DEFAULT const is declared later in the file; seed() runs first)
+  db.prepare('INSERT OR IGNORE INTO ad_networks(id,json) VALUES(1,?)').run(JSON.stringify({ monetag: { enabled: false, zone_id: '', script_url: '' }, adsterra: { enabled: false, banner_key: '', native_key: '' } }));
   if (!db.prepare('SELECT id FROM app_version WHERE id=1').get()) {
     db.prepare('INSERT INTO app_version(id,latest_name,latest_code,min_code,force_update,store_url,release_notes) VALUES(1,?,?,?,?,?,?)')
       .run('1.0.0', 1, 1, 0, 'https://play.google.com/store/apps/details?id=com.raazindia.raaz', 'Initial release');
@@ -288,6 +291,30 @@ function getSettings() {
   db.prepare('SELECT key,value FROM app_settings').all().forEach(r => o[r.key] = r.value);
   return o;
 }
+/* Extra ad networks (Monetag / Adsterra) — single-row JSON config, admin-managed.
+   AdMob stays on its existing controls (global settings + per-video/category rules);
+   these networks are additive and only activate when an admin enables them AND
+   pastes the network's real zone/key/script values here. Nothing is faked. */
+const AD_NETWORKS_DEFAULT = { monetag: { enabled: false, zone_id: '', script_url: '' }, adsterra: { enabled: false, banner_key: '', native_key: '' } };
+function getAdNetworks() {
+  const out = JSON.parse(JSON.stringify(AD_NETWORKS_DEFAULT));
+  try {
+    const row = db.prepare('SELECT json FROM ad_networks WHERE id=1').get();
+    if (row && row.json) {
+      const stored = JSON.parse(row.json);
+      for (const net of Object.keys(out)) {
+        if (stored && typeof stored[net] === 'object' && stored[net]) {
+          for (const k of Object.keys(out[net])) {
+            if (k === 'enabled') { if (typeof stored[net][k] === 'boolean') out[net][k] = stored[net][k]; }
+            else if (typeof stored[net][k] === 'string') out[net][k] = stored[net][k];
+          }
+        }
+      }
+    }
+  } catch (_) {}
+  return out;
+}
+const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function getBranding() {
   const o = {};
   db.prepare('SELECT key,value FROM branding').all().forEach(r => o[r.key] = r.value);
@@ -309,6 +336,7 @@ route('GET', '/api/config', (req, res) => {
     },
     version: { latest_name: v.latest_name, latest_code: v.latest_code, min_code: v.min_code, force_update: !!v.force_update, store_url: v.store_url, release_notes: v.release_notes },
     branding: { app_name: b.app_name, primary_color: b.primary_color, tagline: b.tagline, logo_url: b.logo_url, splash_url: b.splash_url },
+    adNetworks: getAdNetworks(),
     ads: {
       admob_enabled: bool(s.admob_enabled), admob_app_id: s.admob_app_id || null,
       precedence: 'legal/consent > global_off > video_override > category_default > global_default',
@@ -906,6 +934,32 @@ route('PUT', '/api/admin/branding', async (req, res) => {
   audit(a.id, 'branding_update', 'branding', null, b.reason || null, { keys: Object.keys(b) });
   send(res, 200, getBranding());
 });
+route('GET', '/api/admin/ad-networks', (req, res) => { const a = authAdmin(req, res); if (a) send(res, 200, getAdNetworks()); });
+route('PUT', '/api/admin/ad-networks', async (req, res) => {
+  const a = authAdmin(req, res, ['super_admin', 'content_manager']); if (!a) return;
+  const b = await readBody(req);
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return err(res, 400, 'JSON object required');
+  const out = JSON.parse(JSON.stringify(AD_NETWORKS_DEFAULT));
+  for (const net of Object.keys(AD_NETWORKS_DEFAULT)) {
+    if (b[net] === undefined) continue;
+    if (!b[net] || typeof b[net] !== 'object' || Array.isArray(b[net])) return err(res, 400, net + ' must be an object');
+    for (const k of Object.keys(AD_NETWORKS_DEFAULT[net])) {
+      if (b[net][k] === undefined) continue;
+      if (k === 'enabled') {
+        if (typeof b[net][k] !== 'boolean') return err(res, 400, net + '.enabled must be a boolean');
+        out[net][k] = b[net][k];
+      } else {
+        if (typeof b[net][k] !== 'string') return err(res, 400, net + '.' + k + ' must be a string');
+        const v = b[net][k].trim();
+        if (v.length > 500) return err(res, 400, net + '.' + k + ' is too long (max 500 chars)');
+        out[net][k] = v;
+      }
+    }
+  }
+  db.prepare('INSERT INTO ad_networks(id,json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET json=excluded.json').run(JSON.stringify(out));
+  audit(a.id, 'ad_networks_update', 'ad_networks', 1, b.reason || null, { monetag_enabled: out.monetag.enabled, adsterra_enabled: out.adsterra.enabled });
+  send(res, 200, out);
+});
 const SECRET_KEYS = ['paypal_secret', 'paytm_key', 'onesignal_api_key'];
 route('GET', '/api/admin/payment-config', (req, res) => {
   const a = authAdmin(req, res); if (!a) return;
@@ -971,7 +1025,7 @@ route('GET', '/api/admin/analytics', (req, res) => {
 });
 
 /* ================= SQL EXPORT / IMPORT ================= */
-const EXPORT_TABLES = ['categories', 'videos', 'home_sections', 'feed_collections', 'feed_items', 'users', 'plans', 'coin_packages', 'coin_ledger', 'unlocks', 'payment_claims', 'reward_config', 'reward_claims', 'watch_history', 'app_settings', 'app_version', 'branding', 'notifications', 'reports'];
+const EXPORT_TABLES = ['categories', 'videos', 'home_sections', 'feed_collections', 'feed_items', 'users', 'plans', 'coin_packages', 'coin_ledger', 'unlocks', 'payment_claims', 'reward_config', 'reward_claims', 'watch_history', 'app_settings', 'app_version', 'branding', 'notifications', 'reports', 'ad_networks'];
 function sqlVal(v) {
   if (v === null || v === undefined) return 'NULL';
   if (typeof v === 'number') return String(v);
@@ -1060,7 +1114,8 @@ const DOCS_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Raaz 
 <style>body{font-family:system-ui,sans-serif;margin:2rem;max-width:900px;color:#2b2b30}h1{color:#e0245e}code{background:#fdf0f3;padding:2px 6px;border-radius:6px}li{margin:4px 0}.m{font-weight:700;color:#e0245e}</style></head><body>
 <h1>Raaz API v1</h1><p>Base: same origin. Auth: <code>Authorization: Bearer &lt;token&gt;</code>. Android package: <code>com.raazindia.raaz</code>. Admin UI: <a href="/admin">/admin</a>.</p>
 <h2>App API</h2><ul>
-<li><span class="m">GET</span> <code>/api/config</code> — remote settings, version, branding</li>
+<li><span class="m">GET</span> <code>/api/config</code> — remote settings, version, branding, plus <code>adNetworks</code> (Monetag/Adsterra public config)</li>
+<li><span class="m">GET</span> <code>/watch/:id</code> — public share landing page for a published video (title, description, thumbnail, category + Open Graph tags; no source URL)</li>
 <li><span class="m">GET</span> <code>/api/home</code> — featured, sections, categories</li>
 <li><span class="m">GET</span> <code>/api/feeds</code> — feed collections</li>
 <li><span class="m">GET</span> <code>/api/categories</code></li>
@@ -1082,7 +1137,7 @@ const DOCS_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Raaz 
 <li><span class="m">POST</span> <code>/api/admin/login</code> (rate-limited, history recorded)</li>
 <li><span class="m">GET</span> <code>/api/admin/dashboard</code> · <code>/api/admin/analytics</code> · <code>/api/admin/audit</code></li>
 <li>CRUD <code>/api/admin/videos</code> (+ <code>/:id/duplicate</code>), <code>/api/admin/categories</code>, <code>/api/admin/feeds</code>, <code>/api/admin/plans</code>, <code>/api/admin/packages</code></li>
-<li><span class="m">GET/PUT</span> <code>/api/admin/home-sections</code>, <code>settings</code>, <code>version</code>, <code>branding</code>, <code>payment-config</code>, <code>rewards-config</code></li>
+<li><span class="m">GET/PUT</span> <code>/api/admin/home-sections</code>, <code>settings</code>, <code>version</code>, <code>branding</code>, <code>payment-config</code>, <code>rewards-config</code>, <code>ad-networks</code> (Monetag/Adsterra config JSON; AdMob stays in settings + per-video rules)</li>
 <li><code>/api/admin/users</code>, <code>/api/admin/users/:id</code>, POST <code>.../pro</code> · <code>.../coins</code> · <code>.../suspend</code> (reason mandatory, audited)</li>
 <li><code>/api/admin/claims</code>, POST <code>/api/admin/claims/:id/approve</code> (credits exactly once) · <code>/reject</code></li>
 <li><code>/api/admin/ledger</code> · <code>/api/admin/notifications</code> · <code>/api/admin/reports</code> (+ resolve)</li>
@@ -1106,6 +1161,38 @@ route('POST', '/api/admin/upload', async (req, res) => {
   fs.writeFileSync(path.join(dir, fname), buf);
   audit(a.id, 'image_upload', 'file', fname, '', m[1] + ' ' + buf.length + ' bytes');
   send(res, 201, { url: '/uploads/' + fname });
+});
+/* --- Public share landing page: /watch/:id (app shares these links) ---
+   Exposes ONLY public fields of a PUBLISHED video (title, description, thumbnail,
+   category) plus Open Graph tags for WhatsApp/social previews. Never source_url. */
+route('GET', '/watch/:id', (req, res, p) => {
+  const b = getBranding();
+  const appName = b.app_name || 'Raaz';
+  const page = inner => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${inner.title ? escHtml(inner.title) + ' · ' : ''}${escHtml(appName)}</title><style>body{font-family:system-ui,sans-serif;margin:0;background:#fff;color:#23232b}main{max-width:640px;margin:0 auto;padding:20px}img.poster{width:100%;border-radius:14px;display:block}h1{font-size:24px;margin:16px 0 6px}.cat{display:inline-block;background:#fdf0f3;color:#e0245e;border-radius:999px;padding:3px 12px;font-size:13px;font-weight:600}.desc{color:#55555f;line-height:1.55;white-space:pre-wrap}.cta{display:block;text-align:center;background:#fa3e55;color:#fff;text-decoration:none;font-weight:700;padding:14px;border-radius:12px;margin-top:22px}.note{text-align:center;color:#8a8a94;font-size:13px;margin-top:10px}</style>${inner.head || ''}</head><body><main>${inner.body}</main></body></html>`;
+  const id = Number(p.id);
+  const t = now();
+  const v = Number.isInteger(id) && id > 0
+    ? db.prepare(`SELECT * FROM videos WHERE id=? AND ${visibleVideoSQL}`).get(id, t, t)
+    : null;
+  if (!v) {
+    return send(res, 404, page({ body: `<h1>Video not found</h1><p class="desc">This video is not available. It may have been removed, or the link is incorrect.</p><p class="note">Open the ${escHtml(appName)} app to browse the latest videos.</p>` }), { 'Content-Type': 'text/html; charset=utf-8' });
+  }
+  const cat = v.category_id ? db.prepare('SELECT name FROM categories WHERE id=?').get(v.category_id) : null;
+  const ver = db.prepare('SELECT store_url FROM app_version WHERE id=1').get();
+  const storeUrl = ver && ver.store_url ? ver.store_url : '';
+  const title = v.title || 'Video';
+  const desc = v.description || '';
+  const og = `<meta property="og:type" content="video.other"><meta property="og:site_name" content="${escHtml(appName)}"><meta property="og:title" content="${escHtml(title)}"><meta property="og:description" content="${escHtml(desc)}">${v.thumb_url ? `<meta property="og:image" content="${escHtml(v.thumb_url)}">` : ''}<meta name="twitter:card" content="summary_large_image">`;
+  const cta = storeUrl
+    ? `<a class="cta" href="${escHtml(storeUrl)}">▶ Watch in the ${escHtml(appName)} app</a>`
+    : `<p class="note">▶ Watch this video in the ${escHtml(appName)} app</p>`;
+  const body = `${v.thumb_url ? `<img class="poster" src="${escHtml(v.thumb_url)}" alt="${escHtml(title)}">` : ''}
+  <h1>${escHtml(title)}</h1>
+  ${cat ? `<span class="cat">${escHtml(cat.name)}</span>` : ''}
+  ${desc ? `<p class="desc">${escHtml(desc)}</p>` : ''}
+  ${cta}
+  <p class="note">This video plays inside the ${escHtml(appName)} app.</p>`;
+  send(res, 200, page({ head: og, body, title }), { 'Content-Type': 'text/html; charset=utf-8' });
 });
 route('GET', '/api/docs', (req, res) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(DOCS_HTML); });
 

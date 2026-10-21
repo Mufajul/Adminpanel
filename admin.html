@@ -96,7 +96,7 @@ async function doLogin() {
   } catch (e) { const d = $('#li_err'); d.style.display = 'block'; d.textContent = e.message; }
 }
 async function logoutAll() { try { await api('POST', '/api/admin/logout-all'); } catch (e) {} TOKEN = ''; localStorage.clear(); location.reload(); }
-const NAV = [['dashboard','📊 Dashboard'],['videos','🎬 Videos'],['categories','🗂 Categories'],['feeds','📰 Feeds'],['home','🏠 Home Sections'],['users','👥 Users'],['plans','👑 Pro Plans'],['packages','🪙 Coin Packages'],['claims','🧾 Payment Claims'],['ledger','📒 Coin Ledger'],['rewards','🎁 Rewards Config'],['notifications','🔔 Notifications'],['settings','⚙️ App Settings'],['version','⬆️ Version Control'],['branding','🎨 Branding'],['payconfig','💳 Payment Config'],['reports','🚩 Reports'],['audit','🧾 Audit Log'],['database','🗄 Database'],['docs','📖 API Docs']];
+const NAV = [['dashboard','📊 Dashboard'],['videos','🎬 Videos'],['categories','🗂 Categories'],['feeds','📰 Feeds'],['home','🏠 Home Sections'],['users','👥 Users'],['plans','👑 Pro Plans'],['packages','🪙 Coin Packages'],['claims','🧾 Payment Claims'],['ledger','📒 Coin Ledger'],['rewards','🎁 Rewards Config'],['notifications','🔔 Notifications'],['settings','⚙️ App Settings'],['adnetworks','📣 Ad Networks'],['version','⬆️ Version Control'],['branding','🎨 Branding'],['payconfig','💳 Payment Config'],['reports','🚩 Reports'],['audit','🧾 Audit Log'],['database','🗄 Database'],['docs','📖 API Docs']];
 function boot() {
   $('#loginWrap').style.display = 'none'; $('#layout').style.display = 'flex';
   $('#meBox').textContent = ADMIN ? (ADMIN.name + ' · ' + ADMIN.role) : '';
@@ -442,6 +442,37 @@ VIEWS.settings = async () => {
   <p><button onclick="saveSettings()">Save Settings</button></p></div>`;
 };
 async function saveSettings() { const body = { maintenance_message: $('#st_msg').value, admob_app_id: $('#st_admob').value, feeds_ad_frequency: $('#st_ffreq').value }; document.querySelectorAll('.stg').forEach(c => body[c.dataset.k] = c.checked ? '1' : '0'); await api('PUT', '/api/admin/settings', body); toast('Settings saved'); }
+
+/* ---------- AD NETWORKS (Monetag / Adsterra — AdMob stays in Settings + Videos) ---------- */
+VIEWS.adnetworks = async () => {
+  const n = await api('GET', '/api/admin/ad-networks');
+  const mt = n.monetag || {}, as = n.adsterra || {};
+  $('#view').innerHTML = `
+  <div class="card"><h3>AdMob (existing — unchanged)</h3>
+  <p style="font-size:12px;color:var(--grey)">AdMob is NOT configured here. Its global on/off switch (<code>admob_enabled</code>) and AdMob App ID live in <b>App Settings</b>, and per-video / per-category ad rules live in the <b>Videos</b> and <b>Categories</b> modules. This page only adds the extra networks below.</p>
+  <p><button class="grey sm" onclick="show('settings')">Open App Settings</button> <button class="grey sm" onclick="show('videos')">Open Videos</button></p></div>
+  <div class="card" style="margin-top:12px"><h3>Monetag</h3>
+  <div class="switch"><input type="checkbox" id="an_mt_on" ${mt.enabled ? 'checked' : ''}> Enable Monetag</div>
+  <label>Zone ID</label><input id="an_mt_zone" value="${esc(mt.zone_id || '')}" placeholder="e.g. 1234567">
+  <label>Script URL</label><input id="an_mt_script" value="${esc(mt.script_url || '')}" placeholder="https://… (Monetag tag/script URL)">
+  </div>
+  <div class="card" style="margin-top:12px"><h3>Adsterra</h3>
+  <div class="switch"><input type="checkbox" id="an_as_on" ${as.enabled ? 'checked' : ''}> Enable Adsterra</div>
+  <label>Banner Key</label><input id="an_as_banner" value="${esc(as.banner_key || '')}" placeholder="Adsterra banner ad key">
+  <label>Native Key</label><input id="an_as_native" value="${esc(as.native_key || '')}" placeholder="Adsterra native ad key">
+  </div>
+  <div class="card" style="margin-top:12px">
+  <p><button onclick="saveAdNetworks()">Save Ad Networks</button></p>
+  <p style="font-size:12px;color:var(--warn)">Honest note: these networks go live only after you paste the real zone IDs / keys / script URL from your Monetag / Adsterra accounts here and enable them. Until then the app receives this config via <code>/api/config → adNetworks</code> with everything empty/off, and no fake ads are shown in the meantime.</p></div>`;
+};
+async function saveAdNetworks() {
+  const body = {
+    monetag: { enabled: $('#an_mt_on').checked, zone_id: $('#an_mt_zone').value.trim(), script_url: $('#an_mt_script').value.trim() },
+    adsterra: { enabled: $('#an_as_on').checked, banner_key: $('#an_as_banner').value.trim(), native_key: $('#an_as_native').value.trim() }
+  };
+  try { await api('PUT', '/api/admin/ad-networks', body); toast('Ad Networks saved'); }
+  catch (e) { toast('Error: ' + e.message); alert(e.message); }
+}
 VIEWS.version = async () => {
   const v = await api('GET', '/api/admin/version');
   $('#view').innerHTML = `<div class="card"><h3>App Version Control</h3>
